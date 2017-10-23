@@ -3,9 +3,8 @@ title: ZombieEpiDemo
 account: amcrisan
 server: shinyapps.io
 appId: 228187
-bundleId: 1040004
+bundleId: 1041469
 url: https://amcrisan.shinyapps.io/zombieepidemo/
-when: 1508725214.30591
+when: 1508802549.58753
 asMultiple: FALSE
 asStatic: FALSE
-ignoredFiles: .Rapp.history

@@ -20,7 +20,6 @@ My goal is to allow someone to interact with this data on their phone, through t
 library(dplyr)
 library(tidyr)
 library(igraph)
-library(timevis)
 library(ggplot2)
 library(lubridate)
 library(visNetwork)
@@ -106,7 +105,7 @@ pBase<-ggplot(data=zombDat, aes(x = dateOfExposureStart,y=ID,group=ID))+
   ylab("Patient ID")+
   theme_bw()+
   ggtitle("Base Timeline of Exposure Times (black tiles) + symptom onset (red circle)")+
-  theme(legend.position="below")
+  theme(legend.position="below",axis.text = element_text(size=14), axis.title = element_text(size=16))
 
 plot(pBase)
 ```

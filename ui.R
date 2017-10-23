@@ -4,7 +4,7 @@ library(shinythemes)
 
 
 header <- dashboardHeader(
-  title = "Zombie Outbreak Timeline",
+  title = "Zombie Outbreak",
   titleWidth = 450
 )
 
@@ -14,7 +14,7 @@ body<-dashboardBody(
   ),
   #menu items
   box(title="Graph Options",
-      status="info",
+      status="warning",
       solidHeader = TRUE,
       width=NULL,
       collapsible = TRUE,
@@ -33,15 +33,30 @@ body<-dashboardBody(
                  hr(),
                  div(HTML("You can <em>change the colour</em> of data points. You can only colour data using one other data type. Use the checkboxes below to select which data point the colour by.")),
                  selectInput("colorData",choices=c("Status"="status","Sex" = "Sex","Occupation"="Occupation"),label=NULL,multiple=FALSE)),
-        tabPanel(title= "Filter by"),
+        tabPanel(title= "Filter by",
+                 hr(),
+                 div(HTML("You can <em> emphasize data </em> by checking off items below. For example, if you check off 'Male' then male patients will be emphasized in the data set.")),
+                checkboxGroupInput("filterSex",label="Sex",choices=c("Male"="M","Female" = "F")),
+                checkboxGroupInput("filterStatus",label="Infection Status",choices=c("Sick"="Sick","Exposed but well" = "ExposedButWell")),
+                checkboxGroupInput("filterExposure",label="Exposures",choices=c("Bite"="Bite",
+                                                                                 "Droplet" = "Droplet",
+                                                                                 "Poop"="Faeces",
+                                                                                 "Household Contact" = "Household",
+                                                                                 "Intercourse"="Sex",
+                                                                                 "Shared Meal" = "Shared Meal")),
+                sliderInput("filterAge", label ="Age Range", min = 0,max = 55, value = c(0, 56))
+                 ),
         type="pills"
       )
   ),
   fluidRow(
-    plotOutput("timeline"),
-    br(),
     div(HTML("<strong>Description of the plot:</strong>")),
-    textOutput("textDesc")
+    textOutput("textDesc"),
+    plotOutput("timeline",height="450px",hover = hoverOpts("plot_click")),
+    uiOutput("click_info"),
+    #uiOutput("hover_info")
+    br(),
+    plotOutput("exposureDat",height="250px")
   )
 )
 dashboardPage(
