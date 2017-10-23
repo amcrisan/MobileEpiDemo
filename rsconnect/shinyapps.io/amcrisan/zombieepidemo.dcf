@@ -1,0 +1,11 @@
+name: zombieepidemo
+title: ZombieEpiDemo
+account: amcrisan
+server: shinyapps.io
+appId: 228187
+bundleId: 1040004
+url: https://amcrisan.shinyapps.io/zombieepidemo/
+when: 1508725214.30591
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .Rapp.history

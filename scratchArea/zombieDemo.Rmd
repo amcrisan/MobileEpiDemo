@@ -1,0 +1,403 @@
+---
+title: "Zombie Outbreak Vis Ideas"
+author: "Ana Crisan"
+date: '2017-10-02'
+output: 
+  pdf_document:
+    toc: TRUE
+    toc_depth: 5
+always_allow_html: yes
+
+---
+
+# Overview
+This document presents some sketched ideas of how the line list data will be visualized. In the final version of this project, an individual will be able to manipulate the basic timeline and network (see below) to colour points, add or remove data, in order to interactively explore the content in the line list. This document *doesn't showcase that interactivity* it just *sketches* what is possible - so please take it as a work in progress and not the final version.  What's different here relative to what the graphic desing folks at science world have done is the interactive component. Maybe they came up with a similar visualization and it's just one very nice picture, but I am allowing people to dynamically change the visualization as they explore the data and ask more questions. 
+
+My goal is to allow someone to interact with this data on their phone, through this visualization. I have been exploring mobile visualizations, some work, some don't, I've met some constraints because of the screen realestate. As a back-up,if I can't make a good phone vis application in this time, a projector connected to my computer would work. 
+
+```{r setup, include=FALSE, message=F,warning=F}
+#libraries
+library(dplyr)
+library(tidyr)
+library(igraph)
+library(timevis)
+library(ggplot2)
+library(lubridate)
+library(visNetwork)
+
+#load data
+zombDat<-read.csv(file="../data/zombieOutbreak.csv",header=T,stringsAsFactors = F)
+
+#clean up the dates
+zombDat$dateOfOnset<-as.Date(zombDat$dateOfOnset, "%d-%b-%y")
+zombDat$dateOfExposureStart<-as.Date(zombDat$dateOfExposureStart, "%d-%b-%y")
+zombDat$dateOfExposureEnd<-as.Date(zombDat$dateOfExposureEnd, "%d-%b-%y")
+
+#for later: show each of the dates
+#add all of the dates between start and end when dates span
+for(i in 1:nrow(zombDat)){
+  tmp<-zombDat[i,]
+  
+  if(tmp$dateOfExposureStart != tmp$dateOfExposureEnd){
+    dateVals<-seq(as.Date(tmp$dateOfExposureStart),
+                  as.Date(tmp$dateOfExposureEnd),
+                  by="1 day")
+
+    for(j in 1:length(dateVals)){
+      tmp2<-tmp
+      tmp$dateOfExposureStart<-dateVals[j]
+      tmp$dateOfExposureEnd<-dateVals[j]
+      zombDat<-rbind(zombDat,tmp)
+    }
+    
+    zombDat[i,]$dateOfExposureEnd<-zombDat[i,]$dateOfExposureStart
+    
+  }
+}
+
+#clean up the data
+exposureDat<-dplyr::select(zombDat,ID,starts_with('exposure')) %>% 
+  tidyr::gather(eType,Exposed,exposureHousehold:exposureBite) %>%
+  mutate(eType=gsub('exposure','',eType)) %>%
+  mutate(Exposed = ifelse(Exposed == "X","Y","N")) %>%
+  mutate(eType = ifelse(eType == "SharedMeal", "Shared Meal",eType))
+
+saveRDS(file="../data/exposureDat.RDS",exposureDat)
+
+zombDat<-dplyr::select(zombDat,-contains('exposure',ignore.case=F))
+
+#wrangle the patient data a little bit
+zombDat<-zombDat %>% 
+  mutate(sourceSplit = ifelse(stringr::str_detect(source,"Patient"),
+                         gsub("Patient ","",source),
+                         ifelse(source == "Rat",-1, source))) %>%
+  mutate(sourceSplit = ifelse(stringr::str_detect(sourceSplit,"Pts"),
+                              strsplit(gsub("Pts ", "", sourceSplit),"&"),sourceSplit)) %>% tidyr::unnest()
+
+
+#finally, there is clean data - don't merge, they're better seperate
+#zombDatClean<-merge(x=zombDat,y=exposure,by="ID")
+
+saveRDS(file="../data/zombDat.RDS",zombDat)
+
+```
+
+
+#Base visualizations
+
+These are the "starting" visualizations, they are simple. They will be "decorated" or changed based upon user interactions (I'll provide examples of how those interacitons could look like shortly). But this will be the first thing people see.
+
+
+## Basic Timeline
+
+The first place to start is just a basic timeline. The interactivity component is that users will be able to select different options to add interesting information to this base. Althought this document is not interactive I will simulate types of interactions that will be supported. The users can slice and colour the data to try to understand what is going on. All of these interactions will be controlled through menus (not shown here). 
+
+Ideally I would like to display this visualization on a cell phone, but some different design decisions need to be made (i.e. maybe more aggregation), to work on a phone.
+
+```{r staticTimeline, message=F,warnings=F,echo=F}
+#to add end date using files, spell out all of the 
+pBase<-ggplot(data=zombDat, aes(x = dateOfExposureStart,y=ID,group=ID))+
+  geom_segment(aes(x=dateOfExposureEnd,y=ID,xend=dateOfOnset,yend=ID,group=ID),colour="grey")+
+  geom_tile(fill = "black",colour="white")+
+  geom_point(aes(x=dateOfOnset,y=ID),colour="black",fill="red",size=2,pch=21)+
+  scale_y_continuous(breaks=0:24)+
+  scale_x_date(date_breaks = "1 week", date_minor_breaks = "1 day")+
+  xlab("Date") +
+  ylab("Patient ID")+
+  theme_bw()+
+  ggtitle("Base Timeline of Exposure Times (black tiles) + symptom onset (red circle)")+
+  theme(legend.position="below")
+
+plot(pBase)
+```
+
+
+## Basic Network Connections
+
+There is a network of patient connections, but it changes over time! Here's the basic network of patient connections. The user will have to *toggle* this option over the existing timeline. This visualization below is interesting, but there is still visual clutter (you can't quite see where the lines go), so either I will provide some base level optimization, or I will allow the user to figure that one out.
+
+**Just a network graph**
+
+The graph is interesting because it gives us some very clear hubs of the transmission and dead ends.
+
+```{r networkOfConnections, message=F,warning=F,echo=F}
+#need to draw start and end segments over time
+#so for each patient, (that's the start ID)
+#example of what the data should like for two patients infected by the index
+connections<-c()
+
+tmp<-arrange(zombDat,ID) %>%
+  select(ID,status,dateOfExposureStart,dateOfExposureEnd,sourceSplit) %>%
+  distinct()
+
+for(id in unique(tmp$ID )){
+  targetInfo<-filter(tmp, ID == id)
+  
+  if(nrow(targetInfo)>1){
+    targetInfo<-data.frame(ID= id,
+                           status=targetInfo[1,]$status,
+                           dateOfExposureStart = targetInfo[1,]$dateOfExposureStart,
+                           dateOfExposureEnd=targetInfo[nrow(targetInfo),]$dateOfExposureStart,
+                           sourceSplit = targetInfo[1,]$sourceSplit)
+  }
+  
+  sourceInfo = filter(tmp, ID == targetInfo$sourceSplit)
+  
+  if(targetInfo$sourceSplit == -1){
+    connections<-rbind(connections,
+                       c(id,-1,
+                         as.character(targetInfo$dateOfExposureStart),
+                         as.character(targetInfo$dateOfExposureStart)))
+  }else{
+    connections<-rbind(connections,
+                       c(id,sourceInfo$ID,
+                         as.character(sourceInfo$dateOfExposureEnd),
+                         as.character(targetInfo$dateOfExposureStart)))
+  }
+}
+
+#now format this data frame a little bit
+connections<-data.frame(connections,stringsAsFactors = F)
+colnames(connections)<-c("ID","source","sourceEnd","targetStart")
+
+#make sure dates are dates
+connections<- connections%>% 
+  mutate(sourceEnd = as.Date(sourceEnd,"%Y-%m-%d")) %>%
+  mutate(targetStart = as.Date(targetStart,"%Y-%m-%d")) %>%
+  mutate(ID = as.numeric(ID)) %>%
+  mutate(source = as.numeric(source)) 
+
+
+saveRDS(file="../data/patientConnects.RDS",connections)
+```
+
+
+```{r highlightConnection, message=F,warning=F,echo=F}
+# make a little graph because then I can trace paths more easily
+el<-dplyr::select(connections, source,ID) %>%
+  mutate(source = as.character(source),
+         ID = as.character(ID)) %>%
+  as.matrix()
+
+#this actually makes a fun bitrate graph
+g<-graph_from_edgelist(el,directed=T)
+
+saveRDS(file="../data/networkGraph.RDS",g)
+
+# Compute node degrees (#links) and use that to set node size:
+deg <- degree(g, mode="all")
+V(g)$size <- deg*5
+
+#plot(g,edge.arrow.size=.4)
+
+#try this out with vis
+
+links<-data.frame(id = connections$ID,from=connections$source,to=connections$ID)
+nodes<- data.frame(id = c("-1",links$id),
+                   label=c("Rat",paste("Pt",links$id)),
+                   degrees = unname(deg),
+                   stringsAsFactors = F) 
+
+nodes$title <- nodes$label
+nodes$font.size<-32
+nodes$shape <- "dot"  
+nodes$shadow <- TRUE # Nodes will drop shadow
+nodes$size <- nodes$degrees*10 # Node size
+nodes$borderWidth <- 2 # Node border width
+nodes$color.background <- "white"
+nodes$color.border <- "black"
+nodes$color.highlight.background <- "orange"
+nodes$color.highlight.border <- "darkred"
+
+visNetwork(nodes, links, width="100%", height="300px") #%>%
+#visOptions(highlightNearest = TRUE, 
+#             selectedBy = "label")
+
+```
+
+**Graph connections overlain on timeline**
+
+```{r networkOnTimeline}
+#overlay connection on top of base
+pBase +geom_curve(data=connections,aes(x=sourceEnd,y=source,xend=targetStart,yend=ID),colour="black",curvature=-0.25,alpha=0.75)
+```
+
+# Interactions
+
+From above base graph, people will have the options to interact with an interface that allows them to do a certain range of things to explore the data. Note, the document here is *not* interactive, and it's not optimized for aesthetics. So please consider this to be a *rough* sketch of what interactions look like so you get a sense of how these interactions will look like. So far I think these will be done by drop down menus where someone can select a variable to colour by, or to add more data, or to highlight something.. etc.. that part is not 100% down yet. 
+
+## Example interaction 1 (Univariable): Colouring by different categorical variables
+
+### Colouring by occupation
+People can choose to colour by  patient occupationg for example. Again, the colour and the fact that the legend is currently cut off will be fixed later. But from below, they should be able to see that many occupations eventually had a symptom onset. They should also maybe realise that colour is not super useful because we quickly run out of colours.
+
+```{r colourByOccupation, message=F,warnings=F,echo=F}
+pBase + geom_tile(aes(fill=Occupation),colour="white") + theme(legend.position="bottom")
+```
+
+An example now of that this looks like if we "toggle" connection to be on
+
+```{r colourByOccupationToggle, message=F,warnings=F,echo=F}
+pBase + geom_tile(aes(fill=Occupation),colour="white") + geom_curve(data=connections,aes(x=sourceEnd,y=source,xend=targetStart,yend=ID),colour="black",curvature=-0.25,alpha=0.75)+
+  theme(legend.position="bottom")
+```
+
+
+
+### colouring by only ONE exposure
+So maybe you want to look at more than one exposure, we'll get to that. Right now, we'll consider just colouring by one exposure. 
+
+*example:exposure to being bitten*
+```{r colourByExposure, message=F,warning=F,echo=F}
+tmp<-filter(exposureDat,eType == "Bite") %>%
+  inner_join(zombDat)
+
+ggplot(data=tmp, aes(x = dateOfExposureStart,y=ID,group=ID))+
+  geom_segment(aes(x=dateOfExposureEnd,y=ID,xend=dateOfOnset,yend=ID,group=ID),colour="grey")+
+  geom_tile(aes(fill=Exposed),colour="white")+
+  geom_point(aes(x=dateOfOnset,y=ID),colour="black",fill="red",size=2,pch=21)+
+  scale_y_continuous(breaks=0:24)+
+  scale_x_date(date_breaks = "1 week", date_minor_breaks = "1 day")+
+  scale_fill_discrete(name="Exposure to Bite")+
+  xlab("Date") +
+  ylab("Patient ID")+
+  theme_bw()+
+  ggtitle("Exposed to bite + symptom onset (red circle)")
+
+```
+
+### colour by people the patient knows
+
+Here, I've made -1 be the Rat (this can be better done, but the rest are patient IDS). Also it's sorted by teh first number, instead of the 
+```{r patientKnown,message=F,warning=F,echo=F}
+pBase + geom_tile(aes(fill=sourceSplit),colour="white") + 
+  scale_fill_discrete(name = "Source of Infection (-1 = Rat)")+
+  theme(legend.position="bottom")
+   
+```
+
+**other things to colour by not mentioned here**
+it's also possible to colour by their sex, or even age. It's pretty open, i've only given a few examples.
+
+## Example interaction 2 (Bivariable): Using Colour and Facets
+
+It will also be possible to look at bivariable relationships. Here I will explore facet interactions. Again, these are example of things a user could do. They technically have to discovery this ability and play around with the features of the graph.
+
+### Example: Patient and Exposure to Bites
+Shown here, are individuals that were exposed to bites as well as the *people* they were exposed to. 
+```{r patientandExposureFacets,message=F,warning=F,echo=FALSE}
+
+tmp<-filter(exposureDat,eType == "Bite") %>%
+  inner_join(zombDat)
+
+ggplot(data=tmp, aes(x = dateOfExposureStart,y=ID,group=ID))+
+  geom_segment(aes(x=dateOfExposureEnd,y=ID,xend=dateOfOnset,yend=ID,group=ID),colour="grey")+
+  geom_tile(aes(fill=sourceSplit),colour="white")+
+  geom_point(aes(x=dateOfOnset,y=ID),colour="black",fill="red",size=2,pch=21)+
+  scale_y_continuous(breaks=0:24)+
+  scale_x_date(date_breaks = "1 week", date_minor_breaks = "1 day")+
+  scale_fill_discrete(name="Source of Infection")+
+  facet_grid(Exposed~.,scales="free_y")+
+  xlab("Date") +
+  ylab("Patient ID")+
+  theme_bw()+
+  ggtitle("Exposed to bite + symptom onset (red circle)")
+
+```
+
+### Example: Patient and Exposure to Sex
+Shown here, are individuals that were exposed to bites as well as the *people* they were exposed to. 
+```{r patientandExposureFacetsSex,message=F,warning=F,echo=FALSE}
+
+tmp<-filter(exposureDat,eType == "Sex") %>%
+  inner_join(zombDat)
+
+ggplot(data=tmp, aes(x = dateOfExposureStart,y=ID,group=ID))+
+  geom_segment(aes(x=dateOfExposureEnd,y=ID,xend=dateOfOnset,yend=ID,group=ID),colour="grey")+
+  geom_tile(aes(fill=sourceSplit),colour="white")+
+  geom_point(aes(x=dateOfOnset,y=ID),colour="black",fill="red",size=2,pch=21)+
+  scale_y_continuous(breaks=0:24)+
+  scale_x_date(date_breaks = "1 week", date_minor_breaks = "1 day")+
+  scale_fill_discrete(name="Source of Infection")+
+  facet_grid(Exposed~.,scales="free_y")+
+  xlab("Date") +
+  ylab("Patient ID")+
+  theme_bw()+
+  ggtitle("Exposed to bite + symptom onset (red circle)")
+
+```
+
+One thing that should be clear is that colour coding by exposed or not can be useful, but it is not super clear what transmission looks like. So, in addition to the timeline, participiants need another visualization.
+
+
+## Example interaction 3: Hiding and showing data
+
+### All connections originating from one patient
+
+This will change the base graph to emphasize chains of transmissions from some patient to later on. Please note, there may be some bugs I haven't fully cleaned up in the path tracing code. Again, thus *USER* has to make this kind of visualization appear. 
+
+
+```{r showPatients,message=T,warning=F}
+paths<-all_simple_paths(g,from="3")
+
+showNodes<-unique(names(unlist(paths)))
+
+connections<-connections %>%
+  mutate(showConnect = ifelse(source %in% showNodes,"Y","N"))
+
+connectFilt<-connections %>%
+  filter(showConnect == "Y")
+  
+pBase +geom_curve(data=connectFilt,aes(x=sourceEnd,y=source,xend=targetStart,yend=ID,colour=showConnect),colour="purple",curvature=-0.25,alpha=0.75) +
+  ggtitle("All of the connections for patient # 3 and who they infected")
+
+```
+
+Here's an example with the index case
+
+```{r withindexPatientToggle}
+paths<-all_simple_paths(g,from="0")
+
+showNodes<-unique(names(unlist(paths)))
+
+connections<-connections %>%
+  mutate(showConnect = ifelse(source %in% showNodes,"Y","N"))
+
+connectFilt<-connections %>%
+  filter(showConnect == "Y")
+  
+pBase +geom_curve(data=connectFilt,aes(x=sourceEnd,y=source,xend=targetStart,yend=ID,colour=showConnect),colour="purple",curvature=-0.25,alpha=0.75) +
+  ggtitle("All of the connections for patient # 0 and who they infected")
+```
+
+This can also be manipulate by time to constrain the number of connections being shown. Here's the results for between two time periods : the start of the infection to October 16
+
+```{r showTimeConstraints, echo=FALSE,warning=FALSE,message=F}
+
+connectFilt<-connections %>%
+  filter(showConnect == "Y") %>%
+  filter(targetStart < as.Date("2017-10-06"))
+
+pBase +geom_curve(data=connectFilt,aes(x=sourceEnd,y=source,xend=targetStart,yend=ID,colour=showConnect),colour="purple",curvature=-0.25,alpha=0.75) +
+  ggtitle("All of the connections for patient # 0 and\n who were infected before Oct 6")
+
+
+
+```
+
+So you can imagine a patient changing a date slider and showing the connections. We can also show on a graph below they types of exposures so we can see what the dominant type of exposure is for the transmission. I have hestitated from putting graphs side by side or ontop of each other because screen realeaste on a phone is small. 
+
+# End thoughts
+
+These are scratch example of a base timeline visualization and how in can be manipulated (presented here using static examples of interactions). It is NOT the final product, but this is the direciton I am going in.
+
+Still to be done :
+
+Make things pretty
+Implement the interactive version
+
+**IMPORANTLY : A SLIDE PROJECTOR HOOKED UP TO A LAPTIO MAYBE BE A VERY GOOD BACK IN CASE THE PHONE STUFF DOESN'T WORK**
+
+Thanks!
+
+
