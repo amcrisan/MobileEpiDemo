@@ -44,7 +44,7 @@ body<-dashboardBody(
                                                                                  "Household Contact" = "Household",
                                                                                  "Intercourse"="Sex",
                                                                                  "Shared Meal" = "Shared Meal")),
-                sliderInput("filterAge", label ="Age Range", min = 0,max = 55, value = c(0, 56))
+                sliderInput("filterAge", label ="Age Range", min = 0,max = 56, value = c(0, 56))
                  ),
         type="pills"
       )
@@ -54,9 +54,12 @@ body<-dashboardBody(
     textOutput("textDesc"),
     plotOutput("timeline",height="450px",hover = hoverOpts("plot_click")),
     uiOutput("click_info"),
-    #uiOutput("hover_info")
     br(),
-    plotOutput("exposureDat",height="250px")
+    h2("Counts of individuals exposed"),
+    plotOutput("exposureDat",height="250px")#,
+    #br(),
+    #h2("Network of individual connections"),
+    #visNetworkOutput("network")
   )
 )
 dashboardPage(

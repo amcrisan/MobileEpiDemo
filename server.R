@@ -7,6 +7,7 @@ library(ggplot2)
 library(lubridate)
 library(emojifont)
 library(plotly)
+library(visNetwork)
 
 load.emojifont('OpenSansEmoji.ttf')
 
@@ -97,10 +98,14 @@ shinyServer(function(input, output) {
       theme_bw()+
       theme(legend.position="below")+
       scale_alpha_manual(values=c(0.25,1.0),drop=FALSE)+
-      theme(axis.text = element_text(size=14),
+      theme(axis.text = element_text(size=18),
             axis.text.x = element_text(angle=90,vjust=0.5),
+            axis.title = element_text(size=18),
+            legend.text = element_text(size=20),
+            legend.title = element_blank(),
             axis.title.x = element_blank(),
-            panel.grid.major.x = element_line(size=2))
+            panel.grid.major.x = element_line(size=2),
+            legend.position="top")
     
     
     #Baseplot is tile data
@@ -144,7 +149,7 @@ shinyServer(function(input, output) {
     }
     
     #plot the plot!
-    pBase<-pBase + guides(alpha = "none") + theme(legend.position="bottom")
+    pBase<-pBase + guides(alpha = "none")
     pBase
       
   })
@@ -183,9 +188,41 @@ shinyServer(function(input, output) {
     
     p
     
-    ##################################
-    # NETWORK GRAPH
+  })
+  
+  ##################################
+  # NETWORK GRAPH
+  output$network<-renderVisNetwork({
+    links<-data.frame(id = connections$ID,from=connections$source,to=connections$ID)
+    nodes<- data.frame(id = c("-1",links$id),
+                       label=c("Rat",paste("Pt",links$id)),
+                       degrees = unname(deg),
+                       stringsAsFactors = F)
     
+    #creating a useful tool tip
+    toolTipTitle<-sapply(nodes$label,function(x){
+      point<-exposure %>% filter(ID == x)
+      p(HTML(paste0("<b> PatientID: </b>",point$ID[1],
+                  "<b>  | Age: </b>",point$Age[1],
+                  "<b>  | Occupation : </b>",point$Occupation[1],
+                  "<b>  | Sex : </b>",point$Sex[1],"<br>",
+                  "<b> Exposure: </b>",paste0(point$eTypeEmoji,collapse = " , "))))
+    })
+    
+    
+    nodes$title <- toolTipTitle
+    nodes$label<- toolTipTitle
+    nodes$font.size<-32
+    nodes$shape <- "dot"  
+    nodes$shadow <- TRUE # Nodes will drop shadow
+    nodes$size <- nodes$degrees*10 # Node size
+    nodes$borderWidth <- 2 # Node border width
+    nodes$color.background <- "white"
+    nodes$color.border <- "black"
+    nodes$color.highlight.background <- "orange"
+    nodes$color.highlight.border <- "darkred"
+    
+    visNetwork(nodes, links, width="100%", height="300px")
   })
 
   
@@ -200,7 +237,10 @@ shinyServer(function(input, output) {
   })
   
   
-  #reveal patient into
+  #reveal patient info on click
+  #hacked tooltip because I kinda need ggplot's flexibility
+  #this tool tip cose is borrowed from (https://gitlab.com/snippets/16220)
+  #ok - this doesn't adjust easily to changes in the menu
   output$click_info<-renderUI({
     #change zombdat so it is plot compatible with the click outputs
     zombDat$dateOfExposureStart<-as.numeric(zombDat$dateOfExposureStart)
@@ -247,55 +287,8 @@ shinyServer(function(input, output) {
     wellPanel(style = style,
               panelText)
   })
-  #hacked tooltip because I kinda need ggplot's flexibility
-  #this tool tip cose is borrowed from (https://gitlab.com/snippets/16220)
-  #ok - this doesn't adjust easily to changes in the menu
-  output$hover_info <- renderUI({
-    #change zombdat so it is plot compatible with the hover outputs
-    zombDat$dateOfExposureStart<-as.numeric(zombDat$dateOfExposureStart)
-    zombDat$dateOfExposureEnd<-as.numeric(zombDat$dateOfExposureEnd)
-    
-    hover <- input$plot_hover
-    print(hover)
-    point <- nearPoints(zombDat, hover, threshold = 100, maxpoints = 1, addDist = TRUE)
-    if (nrow(point) == 0) return(NULL)
-    
-   
-    # calculate point position INSIDE the image as percent of total dimensions
-    # from left (horizontal) and from top (vertical)
-    left_pct <- (hover$x - hover$domain$left) / (hover$domain$right - hover$domain$left)
-    top_pct <- (hover$domain$top - hover$y) / (hover$domain$top - hover$domain$bottom)
-    
-    # calculate distance from left and bottom side of the picture in pixels
-    left_px <- hover$range$left + left_pct * (hover$range$right - hover$range$left)
-    top_px <- hover$range$top + top_pct *(hover$range$bottom - hover$range$top)
-    
-    # create style property for tooltip
-    # background color is set so tooltip is a bit transparent
-    # z-index is set so we are sure are tooltip will be on top
-    style <- paste0("position:absolute; z-index:100; background-color: rgba(245, 245, 245, 0.85); ",
-                    "left:", left_px + 2, "px; top:", top_px +2, "px;")
-    
-    # actual tooltip created as wellPanel
-    
-    #get the patient's exposures
-    ptExp<-exposure %>%
-      filter(ID == point$ID)
-    
-    wellPanel(
-      style = style,
-      p(HTML(paste0("<b> PatientID: </b>",point$ID,"<br/>",
-                    "<b> Exposure: </b>",paste0(ptExp$eTypeEmoji,collapse = " , "),"<br/>")
-      ))
-      #p(sprintf("Patient ID:%s \n", point$ID))
-      # p(HTML(paste0("<b> Car: </b>", rownames(point), "<br/>",
-      #               "<b> mpg: </b>", point$mpg, "<br/>",
-      #               "<b> hp: </b>", point$hp, "<br/>",
-      #               "<b> Distance from left: </b>", left_px, "<b>, from top: </b>", top_px)))
-    )
-  })
+
+
   
   
-  
-  #changing the content of the filter menu by selection
 })
